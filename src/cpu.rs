@@ -29,6 +29,14 @@ pub struct CPU {
     pub ime: bool, // Interrupt Master Enable
 }
 
+// Flag bit constants
+impl CPU {
+    const FLAG_Z: u8 = 0b1000_0000; // Zero flag
+    const FLAG_N: u8 = 0b0100_0000; // Subtract flag
+    const FLAG_H: u8 = 0b0010_0000; // Half Carry flag
+    const FLAG_C: u8 = 0b0001_0000; // Carry flag
+}
+
 // Implement Display trait for debugging purposes
 impl fmt::Debug for CPU {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -97,6 +105,61 @@ impl CPU {
     fn set_hl(&mut self, value: u16) {
         self.h = (value >> 8) as u8;
         self.l = (value & 0xFF) as u8;
+    }
+
+    // Flag manipulation methods
+    fn set_flag(&mut self, flag: u8) {
+        self.f |= flag;
+    }
+
+    fn clear_flag(&mut self, flag: u8) {
+        self.f &= !flag;
+    }
+
+    fn is_flag_set(&self, flag: u8) -> bool {
+        self.f & flag != 0
+    }
+
+    fn set_flag_if(&mut self, flag: u8, condition: bool) {
+        if condition {
+            self.set_flag(flag);
+        } else {
+            self.clear_flag(flag);
+        }
+    }
+
+    // Specific flag checks
+    fn is_zero_flag_set(&self) -> bool {
+        self.is_flag_set(Self::FLAG_Z)
+    }
+
+    fn is_subtract_flag_set(&self) -> bool {
+        self.is_flag_set(Self::FLAG_N)
+    }
+
+    fn is_half_carry_flag_set(&self) -> bool {
+        self.is_flag_set(Self::FLAG_H)
+    }
+
+    fn is_carry_flag_set(&self) -> bool {
+        self.is_flag_set(Self::FLAG_C)
+    }
+
+    // Setting specific flags
+    fn set_zero_flag(&mut self, condition: bool) {
+        self.set_flag_if(Self::FLAG_Z, condition);
+    }
+
+    fn set_subtract_flag(&mut self, condition: bool) {
+        self.set_flag_if(Self::FLAG_N, condition);
+    }
+
+    fn set_half_carry_flag(&mut self, condition: bool) {
+        self.set_flag_if(Self::FLAG_H, condition);
+    }
+
+    fn set_carry_flag(&mut self, condition: bool) {
+        self.set_flag_if(Self::FLAG_C, condition);
     }
 
     // Fetch next byte
@@ -219,4 +282,3 @@ mod tests {
         assert_eq!(cpu.pc, 0x0102); // PC should be incremented by 2 (1 for opcode, 1 for immediate value)
     }
 }
-
