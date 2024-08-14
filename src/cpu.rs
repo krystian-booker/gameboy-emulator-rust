@@ -56,6 +56,15 @@ impl CPU {
     const VECTOR_JOYPAD: u16 = 0x0060;
 }
 
+// Define the static lookup table for interrupts
+static INTERRUPT_LOOKUP: &[(u8, u16)] = &[
+    (CPU::INTERRUPT_VBLANK, CPU::VECTOR_VBLANK),
+    (CPU::INTERRUPT_LCD_STAT, CPU::VECTOR_LCD_STAT),
+    (CPU::INTERRUPT_TIMER, CPU::VECTOR_TIMER),
+    (CPU::INTERRUPT_SERIAL, CPU::VECTOR_SERIAL),
+    (CPU::INTERRUPT_JOYPAD, CPU::VECTOR_JOYPAD),
+];
+
 // Implement Display trait for debugging purposes
 impl fmt::Debug for CPU {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -230,16 +239,11 @@ impl CPU {
     // Check and handle interrupts
     fn check_interrupts<M: Memory>(&mut self, memory: &mut M) {
         if self.ime && (self.interrupt_flag & self.interrupt_enable) != 0 {
-            if self.interrupt_flag & Self::INTERRUPT_VBLANK != 0 {
-                self.handle_interrupt(memory, Self::VECTOR_VBLANK, Self::INTERRUPT_VBLANK);
-            } else if self.interrupt_flag & Self::INTERRUPT_LCD_STAT != 0 {
-                self.handle_interrupt(memory, Self::VECTOR_LCD_STAT, Self::INTERRUPT_LCD_STAT);
-            } else if self.interrupt_flag & Self::INTERRUPT_TIMER != 0 {
-                self.handle_interrupt(memory, Self::VECTOR_TIMER, Self::INTERRUPT_TIMER);
-            } else if self.interrupt_flag & Self::INTERRUPT_SERIAL != 0 {
-                self.handle_interrupt(memory, Self::VECTOR_SERIAL, Self::INTERRUPT_SERIAL);
-            } else if self.interrupt_flag & Self::INTERRUPT_JOYPAD != 0 {
-                self.handle_interrupt(memory, Self::VECTOR_JOYPAD, Self::INTERRUPT_JOYPAD);
+            for &(flag, vector) in INTERRUPT_LOOKUP {
+                if self.interrupt_flag & flag != 0 {
+                    self.handle_interrupt(memory, vector, flag);
+                    break; // Handle only one interrupt per step
+                }
             }
         }
     }
