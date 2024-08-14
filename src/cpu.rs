@@ -29,6 +29,9 @@ pub struct CPU {
     pub ime: bool,            // Interrupt Master Enable
     pub interrupt_enable: u8, // IE Register
     pub interrupt_flag: u8,   // IF Register
+
+    // Timing
+    pub cycles: u64, // Cycle counter
 }
 
 // Flag bit constants
@@ -56,14 +59,15 @@ impl CPU {
 // Implement Display trait for debugging purposes
 impl fmt::Debug for CPU {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "AF: {:02X}{:02X} BC: {:02X}{:02X} DE: {:02X}{:02X} HL: {:02X}{:02X} SP: {:04X} PC: {:04X} IME: {}",
+        write!(f, "AF: {:02X}{:02X} BC: {:02X}{:02X} DE: {:02X}{:02X} HL: {:02X}{:02X} SP: {:04X} PC: {:04X} IME: {} Cycles: {}",
             self.a, self.f,
             self.b, self.c,
             self.d, self.e,
             self.h, self.l,
             self.sp,
             self.pc,
-            self.ime)
+            self.ime,
+            self.cycles)
     }
 }
 
@@ -84,6 +88,7 @@ impl CPU {
             ime: false,
             interrupt_enable: 0x00,
             interrupt_flag: 0x00,
+            cycles: 0,
         }
     }
 
@@ -210,6 +215,11 @@ impl CPU {
         (high << 8) | low
     }
 
+    // Increment the cycle counter by the specified number of cycles
+    fn add_cycles(&mut self, cycles: u64) {
+        self.cycles += cycles;
+    }
+
     // Execute a single instruction
     pub fn step<M: Memory>(&mut self, memory: &mut M) {
         self.check_interrupts(memory);
@@ -240,6 +250,7 @@ impl CPU {
         self.interrupt_flag &= !flag; // Clear the interrupt flag
         self.push_stack(memory, self.pc); // Push current PC onto stack
         self.pc = vector; // Jump to the interrupt vector
+        self.add_cycles(20); // Interrupt handling takes 20 cycles
     }
 
     // Method to execute an instruction based on the opcode
@@ -256,6 +267,7 @@ impl CPU {
     fn nop(&mut self) {
         // No operation (do nothing)
         println!("NOP");
+        self.add_cycles(4); // NOP takes 4 cycles
     }
 
     fn ld_bc_d16<M: Memory>(&mut self, memory: &mut M) {
@@ -263,6 +275,7 @@ impl CPU {
         let value = self.fetch_word(memory);
         self.set_bc(value);
         println!("LD BC, 0x{:04X}", value);
+        self.add_cycles(12); // LD BC, d16 takes 12 cycles
     }
 
     fn ld_b_n<M: Memory>(&mut self, memory: &mut M) {
@@ -270,6 +283,7 @@ impl CPU {
         let value = self.fetch_byte(memory);
         self.b = value;
         println!("LD B, 0x{:02X}", value);
+        self.add_cycles(8); // LD B, n takes 8 cycles
     }
 }
 
