@@ -26,7 +26,9 @@ pub struct CPU {
     pub pc: u16, // Program Counter
 
     // Internal state
-    pub ime: bool, // Interrupt Master Enable
+    pub ime: bool,            // Interrupt Master Enable
+    pub interrupt_enable: u8, // IE Register
+    pub interrupt_flag: u8,   // IF Register
 }
 
 // Flag bit constants
@@ -35,6 +37,20 @@ impl CPU {
     const FLAG_N: u8 = 0b0100_0000; // Subtract flag
     const FLAG_H: u8 = 0b0010_0000; // Half Carry flag
     const FLAG_C: u8 = 0b0001_0000; // Carry flag
+
+    // Interrupt Flag and Enable Bits
+    const INTERRUPT_VBLANK: u8 = 0b0000_0001;
+    const INTERRUPT_LCD_STAT: u8 = 0b0000_0010;
+    const INTERRUPT_TIMER: u8 = 0b0000_0100;
+    const INTERRUPT_SERIAL: u8 = 0b0000_1000;
+    const INTERRUPT_JOYPAD: u8 = 0b0001_0000;
+
+    // Interrupt Vectors
+    const VECTOR_VBLANK: u16 = 0x0040;
+    const VECTOR_LCD_STAT: u16 = 0x0048;
+    const VECTOR_TIMER: u16 = 0x0050;
+    const VECTOR_SERIAL: u16 = 0x0058;
+    const VECTOR_JOYPAD: u16 = 0x0060;
 }
 
 // Implement Display trait for debugging purposes
@@ -66,6 +82,8 @@ impl CPU {
             sp: 0xFFFE,
             pc: 0x0100,
             ime: false,
+            interrupt_enable: 0x00,
+            interrupt_flag: 0x00,
         }
     }
 
@@ -176,6 +194,54 @@ impl CPU {
         (high << 8) | low
     }
 
+    // Stack operations
+    fn push_stack<M: Memory>(&mut self, memory: &mut M, value: u16) {
+        self.sp = self.sp.wrapping_sub(1);
+        memory.write_byte(self.sp, (value >> 8) as u8);
+        self.sp = self.sp.wrapping_sub(1);
+        memory.write_byte(self.sp, value as u8);
+    }
+
+    fn pop_stack<M: Memory>(&mut self, memory: &mut M) -> u16 {
+        let low = memory.read_byte(self.sp) as u16;
+        self.sp = self.sp.wrapping_add(1);
+        let high = memory.read_byte(self.sp) as u16;
+        self.sp = self.sp.wrapping_add(1);
+        (high << 8) | low
+    }
+
+    // Execute a single instruction
+    pub fn step<M: Memory>(&mut self, memory: &mut M) {
+        self.check_interrupts(memory);
+        let opcode = self.fetch_byte(memory);
+        self.execute(opcode, memory);
+    }
+
+    // Check and handle interrupts
+    fn check_interrupts<M: Memory>(&mut self, memory: &mut M) {
+        if self.ime && (self.interrupt_flag & self.interrupt_enable) != 0 {
+            if self.interrupt_flag & Self::INTERRUPT_VBLANK != 0 {
+                self.handle_interrupt(memory, Self::VECTOR_VBLANK, Self::INTERRUPT_VBLANK);
+            } else if self.interrupt_flag & Self::INTERRUPT_LCD_STAT != 0 {
+                self.handle_interrupt(memory, Self::VECTOR_LCD_STAT, Self::INTERRUPT_LCD_STAT);
+            } else if self.interrupt_flag & Self::INTERRUPT_TIMER != 0 {
+                self.handle_interrupt(memory, Self::VECTOR_TIMER, Self::INTERRUPT_TIMER);
+            } else if self.interrupt_flag & Self::INTERRUPT_SERIAL != 0 {
+                self.handle_interrupt(memory, Self::VECTOR_SERIAL, Self::INTERRUPT_SERIAL);
+            } else if self.interrupt_flag & Self::INTERRUPT_JOYPAD != 0 {
+                self.handle_interrupt(memory, Self::VECTOR_JOYPAD, Self::INTERRUPT_JOYPAD);
+            }
+        }
+    }
+
+    // Handle an interrupt
+    fn handle_interrupt<M: Memory>(&mut self, memory: &mut M, vector: u16, flag: u8) {
+        self.ime = false; // Disable further interrupts
+        self.interrupt_flag &= !flag; // Clear the interrupt flag
+        self.push_stack(memory, self.pc); // Push current PC onto stack
+        self.pc = vector; // Jump to the interrupt vector
+    }
+
     // Method to execute an instruction based on the opcode
     fn execute<M: Memory>(&mut self, opcode: u8, memory: &mut M) {
         match opcode {
@@ -186,12 +252,7 @@ impl CPU {
         }
     }
 
-    // Execute a single instruction
-    pub fn step<M: Memory>(&mut self, memory: &mut M) {
-        let opcode = self.fetch_byte(memory);
-        self.execute(opcode, memory);
-    }
-
+    // Instructions implementations
     fn nop(&mut self) {
         // No operation (do nothing)
         println!("NOP");
