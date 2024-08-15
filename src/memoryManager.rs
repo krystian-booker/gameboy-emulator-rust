@@ -20,7 +20,7 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     pub fn new(rom_data: Vec<u8>, eram_size: usize, mbc_type: MbcType) -> Self {
-        MemoryManager {
+        let mut memory_manager = MemoryManager {
             rom: rom_data,
             vram: [0; 0x2000],
             eram: vec![0; eram_size],
@@ -33,7 +33,51 @@ impl MemoryManager {
             ram_bank: 0, // Start with RAM bank 0
             ram_enabled: false,
             mbc_type,
-        }
+        };
+
+        // Initialize I/O registers according to Game Boy power-up values
+        memory_manager.initialize_io_registers();
+
+        // Return initialized memory_manager
+        memory_manager
+    }
+
+    fn initialize_io_registers(&mut self) {
+        // Initialize specific I/O registers with power-up values
+        self.io[0x00] = 0xCF; // JOYP
+        self.io[0x05] = 0x00; // TIMA
+        self.io[0x06] = 0x00; // TMA
+        self.io[0x07] = 0xF8; // TAC
+        self.io[0x0F] = 0xE1; // IF
+        self.io[0x10] = 0x80; // NR10
+        self.io[0x11] = 0xBF; // NR11
+        self.io[0x12] = 0xF3; // NR12
+        self.io[0x14] = 0xBF; // NR14
+        self.io[0x16] = 0x3F; // NR21
+        self.io[0x17] = 0x00; // NR22
+        self.io[0x19] = 0xBF; // NR24
+        self.io[0x1A] = 0x7F; // NR30
+        self.io[0x1B] = 0xFF; // NR31
+        self.io[0x1C] = 0x9F; // NR32
+        self.io[0x1E] = 0xBF; // NR34
+        self.io[0x20] = 0xFF; // NR41
+        self.io[0x21] = 0x00; // NR42
+        self.io[0x22] = 0x00; // NR43
+        self.io[0x23] = 0xBF; // NR44
+        self.io[0x24] = 0x77; // NR50
+        self.io[0x25] = 0xF3; // NR51
+        self.io[0x26] = 0xF1; // NR52
+        self.io[0x40] = 0x91; // LCDC
+        self.io[0x41] = 0x85; // STAT
+        self.io[0x42] = 0x00; // SCY
+        self.io[0x43] = 0x00; // SCX
+        self.io[0x45] = 0x00; // LYC
+        self.io[0x47] = 0xFC; // BGP
+        self.io[0x48] = 0xFF; // OBP0
+        self.io[0x49] = 0xFF; // OBP1
+        self.io[0x4A] = 0x00; // WY
+        self.io[0x4B] = 0x00; // WX
+        self.io[0xFF] = 0x00; // IE
     }
 
     // Helper function to map address to the correct memory region
@@ -218,7 +262,10 @@ impl MemoryManager {
         match addr {
             // Unusable memory areas
             0xFEA0..=0xFEFF | 0xFF4C..=0xFF7F => {
-                panic!("Attempted to write to an unusable memory address: {:#06X}", addr);
+                panic!(
+                    "Attempted to write to an unusable memory address: {:#06X}",
+                    addr
+                );
             }
 
             // Regular memory mapping
