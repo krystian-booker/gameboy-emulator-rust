@@ -1,5 +1,20 @@
 use crate::cpu::Memory;
 
+#[derive(Clone, Copy)]
+pub enum MbcType {
+    None,
+    MBC1,
+    MBC2,
+    MBC3,
+    MBC5,
+}
+
+#[derive(Clone, Copy)]
+pub enum Mbc1Mode {
+    Rom,
+    Ram,
+}
+
 pub struct MemoryManager {
     // Memory regions
     rom: Vec<u8>,       // ROM, initially 32KB but can be banked
@@ -16,6 +31,8 @@ pub struct MemoryManager {
     ram_bank: usize,   // Current RAM bank (0 to n)
     ram_enabled: bool, // RAM enable flag
     mbc_type: MbcType, // The type of MBC used (if any)
+
+    mbc_mode: Mbc1Mode, // Mode to control ROM/RAM banking
 }
 
 impl MemoryManager {
@@ -33,6 +50,7 @@ impl MemoryManager {
             ram_bank: 0, // Start with RAM bank 0
             ram_enabled: false,
             mbc_type,
+            mbc_mode: Mbc1Mode::Rom, // Initialize MBC1 mode to ROM mode
         };
 
         // Initialize I/O registers according to Game Boy power-up values
@@ -131,18 +149,27 @@ impl MemoryManager {
             }
             0x2000..=0x3FFF => {
                 // Set lower 5 bits of ROM bank number
-                let bank = value as usize & 0x1F;
-                self.rom_bank = match bank {
-                    0 => 1,
-                    _ => bank,
-                };
+                let mut bank = value as usize & 0x1F;
+                if bank == 0 {
+                    bank = 1; // Bank 0 is not allowed, remap to Bank 1
+                }
+                self.rom_bank = (self.rom_bank & 0x60) | bank;
             }
             0x4000..=0x5FFF => {
                 // Set RAM bank number or upper bits of ROM bank number
-                self.ram_bank = (value as usize) & 0x03;
+                let upper_bits = value as usize & 0x03;
+                match self.mbc_mode {
+                    Mbc1Mode::Rom => self.rom_bank = (self.rom_bank & 0x1F) | (upper_bits << 5),
+                    Mbc1Mode::Ram => self.ram_bank = upper_bits,
+                }
             }
             0x6000..=0x7FFF => {
-                // ROM/RAM mode select (not implemented here)
+                // ROM/RAM mode select
+                self.mbc_mode = if value & 0x01 == 0 {
+                    Mbc1Mode::Rom
+                } else {
+                    Mbc1Mode::Ram
+                };
             }
             _ => {}
         }
@@ -193,6 +220,12 @@ impl MemoryManager {
                 self.ram_bank = value as usize & 0x0F;
             }
             _ => {}
+        }
+
+        // Ensure that the ROM bank number does not exceed the available range of the cartridge.
+        let max_bank_number = self.rom.len() / 0x4000 - 1;
+        if self.rom_bank > max_bank_number {
+            self.rom_bank = max_bank_number;
         }
     }
 
@@ -292,14 +325,4 @@ impl Memory for MemoryManager {
     fn write_byte(&mut self, addr: u16, value: u8) {
         self.write_byte(addr, value)
     }
-}
-
-// Define a simple enum for MBC types
-#[derive(Clone, Copy)]
-pub enum MbcType {
-    None,
-    MBC1,
-    MBC2,
-    MBC3,
-    MBC5,
 }
