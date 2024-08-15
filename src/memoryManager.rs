@@ -43,10 +43,11 @@ impl MemoryManager {
             0x8000..=0x9FFF => (&self.vram, (addr - 0x8000) as usize),
             0xA000..=0xBFFF => (&self.eram, (addr - 0xA000) as usize),
             0xC000..=0xDFFF => (&self.wram, (addr - 0xC000) as usize),
+            0xE000..=0xFDFF => (&self.wram, (addr - 0xE000) as usize), // Echo RAM handling
             0xFE00..=0xFE9F => (&self.oam, (addr - 0xFE00) as usize),
             0xFF00..=0xFF7F => (&self.io, (addr - 0xFF00) as usize),
             0xFF80..=0xFFFE => (&self.hram, (addr - 0xFF80) as usize),
-            0xFFFF => (std::slice::from_ref(&self.ie), 0), // Reference directly to the ie register
+            0xFFFF => (std::slice::from_ref(&self.ie), 0),
             _ => panic!("Attempted to access unknown memory address: {:#06X}", addr),
         }
     }
@@ -58,10 +59,11 @@ impl MemoryManager {
             0x8000..=0x9FFF => (&mut self.vram, (addr - 0x8000) as usize),
             0xA000..=0xBFFF => (&mut self.eram, (addr - 0xA000) as usize),
             0xC000..=0xDFFF => (&mut self.wram, (addr - 0xC000) as usize),
+            0xE000..=0xFDFF => (&mut self.wram, (addr - 0xE000) as usize), // Echo RAM handling
             0xFE00..=0xFE9F => (&mut self.oam, (addr - 0xFE00) as usize),
             0xFF00..=0xFF7F => (&mut self.io, (addr - 0xFF00) as usize),
             0xFF80..=0xFFFE => (&mut self.hram, (addr - 0xFF80) as usize),
-            0xFFFF => (std::slice::from_mut(&mut self.ie), 0), // Mutable reference directly to the ie register
+            0xFFFF => (std::slice::from_mut(&mut self.ie), 0),
             _ => panic!("Attempted to access unknown memory address: {:#06X}", addr),
         }
     }
