@@ -65,6 +65,9 @@ static INTERRUPT_LOOKUP: &[(u8, u16)] = &[
     (CPU::INTERRUPT_JOYPAD, CPU::VECTOR_JOYPAD),
 ];
 
+// Type alias for opcode handler functions
+type OpcodeHandler<M> = fn(&mut CPU, &mut M);
+
 // Implement Display trait for debugging purposes
 impl fmt::Debug for CPU {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -195,14 +198,14 @@ impl CPU {
     }
 
     // Fetch next byte
-    fn fetch_byte<M: Memory>(&mut self, memory: &mut M) -> u8 {
+    fn fetch_byte<M: Memory + ?Sized>(&mut self, memory: &mut M) -> u8 {
         let byte = memory.read_byte(self.pc);
         self.pc = self.pc.wrapping_add(1);
         byte
     }
 
     // Fetch next word (2 bytes)
-    fn fetch_word<M: Memory>(&mut self, memory: &mut M) -> u16 {
+    fn fetch_word<M: Memory + ?Sized>(&mut self, memory: &mut M) -> u16 {
         let low = self.fetch_byte(memory) as u16;
         let high = self.fetch_byte(memory) as u16;
         (high << 8) | low
@@ -211,9 +214,9 @@ impl CPU {
     // Stack operations
     fn push_stack<M: Memory>(&mut self, memory: &mut M, value: u16) {
         self.sp = self.sp.wrapping_sub(1);
-        memory.write_byte(self.sp, (value >> 8) as u8);
+        memory.write_byte(self.sp, (value & 0xFF) as u8); // Push low byte first
         self.sp = self.sp.wrapping_sub(1);
-        memory.write_byte(self.sp, value as u8);
+        memory.write_byte(self.sp, (value >> 8) as u8); // Then push high byte
     }
 
     fn pop_stack<M: Memory>(&mut self, memory: &mut M) -> u16 {
@@ -221,7 +224,7 @@ impl CPU {
         self.sp = self.sp.wrapping_add(1);
         let high = memory.read_byte(self.sp) as u16;
         self.sp = self.sp.wrapping_add(1);
-        (high << 8) | low
+        (high << 8) | low // Combine high and low bytes
     }
 
     // Increment the cycle counter by the specified number of cycles
@@ -229,8 +232,17 @@ impl CPU {
         self.cycles += cycles;
     }
 
+    // Define a lookup table for opcode handlers
+    const OPCODE_TABLE: [OpcodeHandler<dyn Memory>; 256] = {
+        let mut table: [OpcodeHandler<dyn Memory>; 256] = [CPU::unimplemented; 256];
+        table[0x00] = CPU::nop;
+        table[0x01] = CPU::ld_bc_d16;
+        table[0x06] = CPU::ld_b_n;
+        table
+    };
+
     // Execute a single instruction
-    pub fn step<M: Memory>(&mut self, memory: &mut M) {
+    pub fn step<M: Memory + 'static>(&mut self, memory: &mut M) {
         self.check_interrupts(memory);
         let opcode = self.fetch_byte(memory);
         self.execute(opcode, memory);
@@ -258,23 +270,19 @@ impl CPU {
     }
 
     // Method to execute an instruction based on the opcode
-    fn execute<M: Memory>(&mut self, opcode: u8, memory: &mut M) {
-        match opcode {
-            0x00 => self.nop(),
-            0x01 => self.ld_bc_d16(memory),
-            0x06 => self.ld_b_n(memory),
-            _ => panic!("Unrecognized opcode: {:#X}", opcode),
-        }
+    fn execute<M: Memory + 'static>(&mut self, opcode: u8, memory: &mut M) {
+        let handler = CPU::OPCODE_TABLE[opcode as usize];
+        handler(self, memory);
     }
 
     // Instructions implementations
-    fn nop(&mut self) {
+    fn nop<M: Memory + ?Sized>(&mut self, _memory: &mut M) {
         // No operation (do nothing)
         println!("NOP");
         self.add_cycles(4); // NOP takes 4 cycles
     }
 
-    fn ld_bc_d16<M: Memory>(&mut self, memory: &mut M) {
+    fn ld_bc_d16<M: Memory + ?Sized>(&mut self, memory: &mut M) {
         // LD BC, d16 : Load 16-bit immediate value into BC register
         let value = self.fetch_word(memory);
         self.set_bc(value);
@@ -282,12 +290,17 @@ impl CPU {
         self.add_cycles(12); // LD BC, d16 takes 12 cycles
     }
 
-    fn ld_b_n<M: Memory>(&mut self, memory: &mut M) {
+    fn ld_b_n<M: Memory + ?Sized>(&mut self, memory: &mut M) {
         // LD B, n : Load immediate 8-bit value into B register
         let value = self.fetch_byte(memory);
         self.b = value;
         println!("LD B, 0x{:02X}", value);
         self.add_cycles(8); // LD B, n takes 8 cycles
+    }
+
+    // Handle unimplemented opcodes
+    fn unimplemented<M: Memory + ?Sized>(&mut self, _memory: &mut M) {
+        panic!("Unimplemented opcode");
     }
 }
 
@@ -322,6 +335,442 @@ impl Memory for TestMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_get_af() {
+        let mut cpu = CPU::new();
+
+        // Set specific values to registers A and F
+        cpu.a = 0x12;
+        cpu.f = 0x34;
+
+        // The combined 16-bit value should be 0x1234
+        assert_eq!(cpu.get_af(), 0x1234);
+    }
+
+    #[test]
+    fn test_get_bc() {
+        let mut cpu = CPU::new();
+
+        // Set specific values to registers B and C
+        cpu.b = 0xAB;
+        cpu.c = 0xCD;
+
+        // The combined 16-bit value should be 0xABCD
+        assert_eq!(cpu.get_bc(), 0xABCD);
+    }
+
+    #[test]
+    fn test_get_de() {
+        let mut cpu = CPU::new();
+
+        // Set specific values to registers D and E
+        cpu.d = 0x56;
+        cpu.e = 0x78;
+
+        // The combined 16-bit value should be 0x5678
+        assert_eq!(cpu.get_de(), 0x5678);
+    }
+
+    #[test]
+    fn test_get_hl() {
+        let mut cpu = CPU::new();
+
+        // Set specific values to registers H and L
+        cpu.h = 0x9A;
+        cpu.l = 0xBC;
+
+        // The combined 16-bit value should be 0x9ABC
+        assert_eq!(cpu.get_hl(), 0x9ABC);
+    }
+
+    #[test]
+    fn test_set_af() {
+        let mut cpu = CPU::new();
+
+        // Set AF register pair to a 16-bit value
+        cpu.set_af(0x1234);
+
+        // Verify that A and F registers are set correctly
+        assert_eq!(cpu.a, 0x12);
+        assert_eq!(cpu.f, 0x30); // Lower 4 bits should be zero, so 0x34 becomes 0x30
+    }
+
+    #[test]
+    fn test_set_bc() {
+        let mut cpu = CPU::new();
+
+        // Set BC register pair to a 16-bit value
+        cpu.set_bc(0xABCD);
+
+        // Verify that B and C registers are set correctly
+        assert_eq!(cpu.b, 0xAB);
+        assert_eq!(cpu.c, 0xCD);
+    }
+
+    #[test]
+    fn test_set_de() {
+        let mut cpu = CPU::new();
+
+        // Set DE register pair to a 16-bit value
+        cpu.set_de(0x5678);
+
+        // Verify that D and E registers are set correctly
+        assert_eq!(cpu.d, 0x56);
+        assert_eq!(cpu.e, 0x78);
+    }
+
+    #[test]
+    fn test_set_hl() {
+        let mut cpu = CPU::new();
+
+        // Set HL register pair to a 16-bit value
+        cpu.set_hl(0x9ABC);
+
+        // Verify that H and L registers are set correctly
+        assert_eq!(cpu.h, 0x9A);
+        assert_eq!(cpu.l, 0xBC);
+    }
+
+    #[test]
+    fn test_set_flag() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x00; // Start with no flags set
+
+        // Set the Zero flag (0b1000_0000)
+        cpu.set_flag(CPU::FLAG_Z);
+        assert_eq!(cpu.f, 0x80); // Zero flag should be set
+
+        // Set the Carry flag (0b0001_0000)
+        cpu.set_flag(CPU::FLAG_C);
+        assert_eq!(cpu.f, 0x90); // Both Zero and Carry flags should be set
+    }
+
+    #[test]
+    fn test_clear_flag() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0xF0; // Start with all flags set (0b1111_0000)
+
+        // Clear the Zero flag (0b1000_0000)
+        cpu.clear_flag(CPU::FLAG_Z);
+        assert_eq!(cpu.f, 0x70); // Zero flag should be cleared
+
+        // Clear the Carry flag (0b0001_0000)
+        cpu.clear_flag(CPU::FLAG_C);
+        assert_eq!(cpu.f, 0x60); // Both Zero and Carry flags should be cleared
+    }
+
+    #[test]
+    fn test_is_flag_set() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x30; // Set some flags: 0b0101_0000 (Half Carry and Carry flags)
+
+        // Check if the Zero flag is set
+        assert_eq!(cpu.is_flag_set(CPU::FLAG_Z), false); // Zero flag should not be set
+
+        // Check if the Half Carry flag is set
+        assert_eq!(cpu.is_flag_set(CPU::FLAG_H), true); // Half Carry flag should be set
+
+        // Check if the Carry flag is set
+        assert_eq!(cpu.is_flag_set(CPU::FLAG_C), true); // Carry flag should be set
+    }
+
+    #[test]
+    fn test_set_flag_if() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x00; // Start with no flags set
+
+        // Set the Zero flag if condition is true
+        cpu.set_flag_if(CPU::FLAG_Z, true);
+        assert_eq!(cpu.f, 0x80); // Zero flag should be set
+
+        // Clear the Zero flag if condition is false
+        cpu.set_flag_if(CPU::FLAG_Z, false);
+        assert_eq!(cpu.f, 0x00); // Zero flag should be cleared
+
+        // Set the Carry flag if condition is true
+        cpu.set_flag_if(CPU::FLAG_C, true);
+        assert_eq!(cpu.f, 0x10); // Carry flag should be set
+
+        // Ensure the Carry flag remains set if condition is false
+        cpu.set_flag_if(CPU::FLAG_C, false);
+        assert_eq!(cpu.f, 0x00); // Carry flag should be cleared
+    }
+
+    #[test]
+    fn test_is_zero_flag_set() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x80; // Set the Zero flag (0b1000_0000)
+        assert_eq!(cpu.is_zero_flag_set(), true); // Zero flag should be set
+
+        cpu.f = 0x00; // Clear all flags
+        assert_eq!(cpu.is_zero_flag_set(), false); // Zero flag should not be set
+    }
+
+    #[test]
+    fn test_is_subtract_flag_set() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x40; // Set the Subtract flag (0b0100_0000)
+        assert_eq!(cpu.is_subtract_flag_set(), true); // Subtract flag should be set
+
+        cpu.f = 0x00; // Clear all flags
+        assert_eq!(cpu.is_subtract_flag_set(), false); // Subtract flag should not be set
+    }
+
+    #[test]
+    fn test_is_half_carry_flag_set() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x20; // Set the Half Carry flag (0b0010_0000)
+        assert_eq!(cpu.is_half_carry_flag_set(), true); // Half Carry flag should be set
+
+        cpu.f = 0x00; // Clear all flags
+        assert_eq!(cpu.is_half_carry_flag_set(), false); // Half Carry flag should not be set
+    }
+
+    #[test]
+    fn test_is_carry_flag_set() {
+        let mut cpu = CPU::new();
+
+        cpu.f = 0x10; // Set the Carry flag (0b0001_0000)
+        assert_eq!(cpu.is_carry_flag_set(), true); // Carry flag should be set
+
+        cpu.f = 0x00; // Clear all flags
+        assert_eq!(cpu.is_carry_flag_set(), false); // Carry flag should not be set
+    }
+
+    #[test]
+    fn test_set_zero_flag() {
+        let mut cpu = CPU::new();
+
+        // Set Zero flag when condition is true
+        cpu.set_zero_flag(true);
+        assert_eq!(cpu.is_zero_flag_set(), true); // Zero flag should be set
+
+        // Clear Zero flag when condition is false
+        cpu.set_zero_flag(false);
+        assert_eq!(cpu.is_zero_flag_set(), false); // Zero flag should not be set
+    }
+
+    #[test]
+    fn test_set_subtract_flag() {
+        let mut cpu = CPU::new();
+
+        // Set Subtract flag when condition is true
+        cpu.set_subtract_flag(true);
+        assert_eq!(cpu.is_subtract_flag_set(), true); // Subtract flag should be set
+
+        // Clear Subtract flag when condition is false
+        cpu.set_subtract_flag(false);
+        assert_eq!(cpu.is_subtract_flag_set(), false); // Subtract flag should not be set
+    }
+
+    #[test]
+    fn test_set_half_carry_flag() {
+        let mut cpu = CPU::new();
+
+        // Set Half Carry flag when condition is true
+        cpu.set_half_carry_flag(true);
+        assert_eq!(cpu.is_half_carry_flag_set(), true); // Half Carry flag should be set
+
+        // Clear Half Carry flag when condition is false
+        cpu.set_half_carry_flag(false);
+        assert_eq!(cpu.is_half_carry_flag_set(), false); // Half Carry flag should not be set
+    }
+
+    #[test]
+    fn test_set_carry_flag() {
+        let mut cpu = CPU::new();
+
+        // Set Carry flag when condition is true
+        cpu.set_carry_flag(true);
+        assert_eq!(cpu.is_carry_flag_set(), true); // Carry flag should be set
+
+        // Clear Carry flag when condition is false
+        cpu.set_carry_flag(false);
+        assert_eq!(cpu.is_carry_flag_set(), false); // Carry flag should not be set
+    }
+
+    #[test]
+    fn test_fetch_byte() {
+        let mut cpu = CPU::new();
+        let mut memory = TestMemory::new();
+
+        // Load some bytes into memory at the program counter (PC) location
+        memory.load(0x0100, &[0x12, 0x34, 0x56]);
+
+        // Set the PC to 0x0100
+        cpu.pc = 0x0100;
+
+        // Fetch the first byte
+        let byte1 = cpu.fetch_byte(&mut memory);
+        assert_eq!(byte1, 0x12); // The first byte should be 0x12
+        assert_eq!(cpu.pc, 0x0101); // PC should increment by 1
+
+        // Fetch the next byte
+        let byte2 = cpu.fetch_byte(&mut memory);
+        assert_eq!(byte2, 0x34); // The second byte should be 0x34
+        assert_eq!(cpu.pc, 0x0102); // PC should increment by 1 again
+
+        // Fetch the next byte
+        let byte3 = cpu.fetch_byte(&mut memory);
+        assert_eq!(byte3, 0x56); // The third byte should be 0x56
+        assert_eq!(cpu.pc, 0x0103); // PC should increment by 1 again
+    }
+
+    #[test]
+    fn test_fetch_word() {
+        let mut cpu = CPU::new();
+        let mut memory = TestMemory::new();
+
+        // Load a word (two bytes) into memory at the program counter (PC) location
+        memory.load(0x0100, &[0x34, 0x12, 0x78, 0x56]);
+
+        // Set the PC to 0x0100
+        cpu.pc = 0x0100;
+
+        // Fetch the first word (2 bytes)
+        let word1 = cpu.fetch_word(&mut memory);
+        assert_eq!(word1, 0x1234); // The first word should be 0x1234
+        assert_eq!(cpu.pc, 0x0102); // PC should increment by 2
+
+        // Fetch the next word (2 bytes)
+        let word2 = cpu.fetch_word(&mut memory);
+        assert_eq!(word2, 0x5678); // The second word should be 0x5678
+        assert_eq!(cpu.pc, 0x0104); // PC should increment by 2 again
+    }
+
+    #[test]
+    fn test_push_stack() {
+        let mut cpu = CPU::new();
+        let mut memory = TestMemory::new();
+
+        cpu.sp = 0xFFFE; // Set SP to top of the stack
+        let value_to_push = 0x1234;
+
+        cpu.push_stack(&mut memory, value_to_push);
+
+        // SP should now be decremented by 2
+        assert_eq!(cpu.sp, 0xFFFC);
+
+        // The value 0x1234 should be stored at memory[0xFFFC] and memory[0xFFFD]
+        assert_eq!(memory.read_byte(0xFFFC), 0x12); // High byte
+        assert_eq!(memory.read_byte(0xFFFD), 0x34); // Low byte
+    }
+
+    #[test]
+    fn test_pop_stack() {
+        let mut cpu = CPU::new();
+        let mut memory = TestMemory::new();
+
+        // Preload stack with a value in correct order
+        cpu.sp = 0xFFFC; // Set SP to where we want to pop from
+        memory.write_byte(0xFFFC, 0x34); // Low byte
+        memory.write_byte(0xFFFD, 0x12); // High byte
+
+        let popped_value = cpu.pop_stack(&mut memory);
+
+        // SP should now be incremented by 2
+        assert_eq!(cpu.sp, 0xFFFE);
+
+        // The popped value should be 0x1234
+        assert_eq!(popped_value, 0x1234);
+    }
+
+    #[test]
+    fn test_add_cycles() {
+        let mut cpu = CPU::new();
+
+        // Ensure the initial cycle count is zero
+        assert_eq!(cpu.cycles, 0);
+
+        // Add 4 cycles
+        cpu.add_cycles(4);
+        assert_eq!(cpu.cycles, 4); // Cycle counter should now be 4
+
+        // Add another 10 cycles
+        cpu.add_cycles(10);
+        assert_eq!(cpu.cycles, 14); // Cycle counter should now be 14
+
+        // Add 100 cycles
+        cpu.add_cycles(100);
+        assert_eq!(cpu.cycles, 114); // Cycle counter should now be 114
+    }
+
+    #[test]
+    fn test_cpu_initialization_and_execution() {
+        let mut cpu = CPU::new();
+        let mut memory = TestMemory::new();
+
+        // Load a small program into memory:
+        // 0x0100: LD BC, 0x1234 (0x01 0x34 0x12)
+        // 0x0103: LD B, 0x42 (0x06 0x42)
+        // 0x0105: NOP (0x00)
+        let program = [
+            0x01, 0x34, 0x12, // LD BC, 0x1234
+            0x06, 0x42, // LD B, 0x42
+            0x00, // NOP
+        ];
+
+        memory.load(0x0100, &program);
+
+        // Execute the first instruction: LD BC, 0x1234
+        cpu.step(&mut memory);
+        assert_eq!(cpu.get_bc(), 0x1234);
+        assert_eq!(cpu.pc, 0x0103);
+
+        // Execute the second instruction: LD B, 0x42
+        cpu.step(&mut memory);
+        assert_eq!(cpu.b, 0x42);
+        assert_eq!(cpu.pc, 0x0105);
+
+        // Execute the third instruction: NOP
+        cpu.step(&mut memory);
+        assert_eq!(cpu.pc, 0x0106); // PC should increment by 1 after NOP
+        assert_eq!(cpu.cycles, 24); // Ensure the correct number of cycles have passed
+
+        // Ensure the CPU registers have the expected values after execution
+        assert_eq!(cpu.get_bc(), 0x4234); // B should now be 0x42, C remains 0x34
+    }
+
+    #[test]
+    fn test_check_interrupts() {
+        let mut cpu = CPU::new();
+        let mut memory = TestMemory::new();
+
+        // Set up initial CPU state
+        cpu.ime = true; // Enable interrupts
+        cpu.interrupt_enable = CPU::INTERRUPT_VBLANK; // Enable VBLANK interrupt
+        cpu.interrupt_flag = CPU::INTERRUPT_VBLANK; // Trigger the VBLANK interrupt
+        cpu.pc = 0x0100; // Set PC to a known location
+
+        // Execute check_interrupts, which should handle the VBLANK interrupt
+        cpu.check_interrupts(&mut memory);
+
+        // After handling the VBLANK interrupt, the following should have happened:
+        // 1. IME should be disabled
+        assert_eq!(cpu.ime, false);
+
+        // 2. The interrupt flag for VBLANK should be cleared
+        assert_eq!(cpu.interrupt_flag & CPU::INTERRUPT_VBLANK, 0);
+
+        // 3. The current PC (0x0100) should have been pushed onto the stack
+        let sp_after_push = cpu.sp;
+        assert_eq!(memory.read_byte(sp_after_push), 0x01); // Higher byte of PC
+        assert_eq!(memory.read_byte(sp_after_push.wrapping_add(1)), 0x00); // Lower byte of PC
+
+        // 4. The PC should now point to the VBLANK interrupt vector (0x0040)
+        assert_eq!(cpu.pc, CPU::VECTOR_VBLANK);
+
+        // 5. Cycles should have been incremented by 20 (for handling the interrupt)
+        assert_eq!(cpu.cycles, 20);
+    }
 
     #[test]
     fn test_nop() {
