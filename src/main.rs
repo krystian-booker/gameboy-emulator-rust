@@ -1,4 +1,5 @@
 mod cpu;
+mod memoryManager;
 
 use cpu::CPU;
 
