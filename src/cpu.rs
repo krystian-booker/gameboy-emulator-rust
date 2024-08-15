@@ -232,6 +232,17 @@ impl CPU {
         self.cycles += cycles;
     }
 
+    //Halt the CPU for a certain number of cycles
+    pub fn cpu_halt<M: Memory>(&mut self, memory: &mut M, cycles: u64) {
+        self.add_cycles(cycles);
+        // During halt, interrupts can still be checked and potentially serviced
+        while self.cycles > 0 {
+            self.check_interrupts(memory);
+            // Simulate passage of time by decrementing the cycles
+            self.cycles -= 1;
+        }
+    }
+
     // Define a lookup table for opcode handlers
     const OPCODE_TABLE: [OpcodeHandler<dyn Memory>; 256] = {
         let mut table: [OpcodeHandler<dyn Memory>; 256] = [CPU::unimplemented; 256];

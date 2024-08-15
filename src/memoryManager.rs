@@ -251,9 +251,25 @@ impl MemoryManager {
     // Handle DMA transfer (OAM DMA)
     fn dma_transfer(&mut self, start_address: u8) {
         let src_base = (start_address as u16) << 8;
+
+        // Halt the CPU for 160 cycles (40 DMA cycles, each 4 CPU cycles long)
         for i in 0..0xA0 {
+            // Each byte transferred during OAM DMA takes 4 clock cycles
             let data = self.read_byte(src_base + i);
-            self.oam[i as usize] = data;
+
+            // During these cycles, only HRAM and I/O access is allowed
+            if (0xFF80..=0xFFFE).contains(&(src_base + i))
+                || (0xFF00..=0xFF7F).contains(&(src_base + i))
+            {
+                // Handle reads to HRAM or I/O normally
+                self.oam[i as usize] = data;
+            } else {
+                // For other memory locations, we assume the access is blocked and no data is written to OAM
+                self.oam[i as usize] = 0xFF;
+            }
+
+            // Simulate CPU halting for 4 cycles per byte
+            // cpu.cpu_halt(memory, 4);
         }
     }
 
@@ -313,16 +329,39 @@ impl MemoryManager {
                 region[offset] = value;
             }
         }
+
+        // pub fn handle_special_io_writes<M: Memory>(
+        //     &mut self,
+        //     memory_manager: &mut MemoryManager,
+        //     addr: u16,
+        //     value: u8,
+        //     memory: &mut M,
+        // ) {
+        //     match addr {
+        //         0xFF04 => {
+        //             // Writing to DIV register resets it to 0
+        //             memory_manager.write_byte(0xFF04, 0, memory);
+        //         }
+        //         0xFF46 => {
+        //             // Trigger DMA transfer
+        //             memory_manager.dma_transfer(value, memory);
+        //         }
+        //         _ => {
+        //             // Standard I/O write
+        //             memory_manager.write_byte(addr, value, memory);
+        //         }
+        //     }
+        // }
     }
 }
 
 // Example integration with CPU
-impl Memory for MemoryManager {
-    fn read_byte(&mut self, addr: u16) -> u8 {
-        self.read_byte(addr)
-    }
+// impl Memory for MemoryManager {
+//     fn read_byte(&mut self, addr: u16) -> u8 {
+//         self.read_byte(addr)
+//     }
 
-    fn write_byte(&mut self, addr: u16, value: u8) {
-        self.write_byte(addr, value)
-    }
-}
+//     fn write_byte(&mut self, addr: u16, value: u8) {
+//         self.write_byte(addr, value)
+//     }
+// }
