@@ -197,6 +197,10 @@ impl MemoryManager {
 
     pub fn read_byte(&self, addr: u16) -> u8 {
         match addr {
+            // Unusable memory areas
+            0xFEA0..=0xFEFF | 0xFF4C..=0xFF7F => 0xFF,
+
+            // Regular memory mapping
             0x0000..=0x3FFF => self.rom[addr as usize], // ROM bank 0
             0x4000..=0x7FFF => self.rom[self.rom_bank * 0x4000 + (addr as usize - 0x4000)], // Switched ROM bank
             0xA000..=0xBFFF if self.ram_enabled => {
@@ -212,6 +216,12 @@ impl MemoryManager {
 
     pub fn write_byte(&mut self, addr: u16, value: u8) {
         match addr {
+            // Unusable memory areas
+            0xFEA0..=0xFEFF | 0xFF4C..=0xFF7F => {
+                panic!("Attempted to write to an unusable memory address: {:#06X}", addr);
+            }
+
+            // Regular memory mapping
             0x0000..=0x7FFF => self.handle_bank_switching(addr, value), // Bank switching and RAM enable
             0xA000..=0xBFFF if self.ram_enabled => {
                 let offset = self.ram_bank * 0x2000 + (addr as usize - 0xA000);
